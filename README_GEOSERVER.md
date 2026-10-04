@@ -34,7 +34,7 @@ python -m uvicorn main:app --reload --port 8000
      (httpd.conf)** แล้วเปลี่ยน `Listen 80` เป็น `Listen 8080` จากนั้นเข้าเว็บที่
      `http://localhost:8080/...` แทน
 2. คัดลอกโฟลเดอร์โปรเจกต์นี้ทั้งหมดไปวางที่ `C:\xampp\htdocs\`
-3. เข้า `http://localhost/webwijai-ahp-main/index.html`
+3. เข้า `http://localhost/webwijai-ahp-geoserver/frontend/index.html`
 
 > หน้าเว็บจะตรวจเองว่าเปิดจาก localhost แล้วต่อ backend ที่ `127.0.0.1:8000`
 > ให้อัตโนมัติ (ดูตัวแปร `LOCAL_BACKEND` ใน `js/app.js` ถ้าต้องการเปลี่ยนพอร์ต)

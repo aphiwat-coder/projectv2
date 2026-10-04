@@ -31,6 +31,8 @@ def _env_bool(name: str, default: str = "false") -> bool:
 
 GEOSERVER_ENABLED = _env_bool("GEOSERVER_ENABLED", "false")
 GEOSERVER_URL = os.getenv("GEOSERVER_URL", "http://localhost:8080/geoserver").rstrip("/")
+# URL ที่ browser ใช้เรียก WMS; อาจต่างจาก URL ภายในเครือข่าย Docker
+GEOSERVER_PUBLIC_URL = os.getenv("GEOSERVER_PUBLIC_URL", GEOSERVER_URL).rstrip("/")
 GEOSERVER_USER = os.getenv("GEOSERVER_USER", "admin")
 GEOSERVER_PASS = os.getenv("GEOSERVER_PASS", "geoserver")
 GEOSERVER_WORKSPACE = os.getenv("GEOSERVER_WORKSPACE", "sugarcane")
@@ -250,7 +252,7 @@ def publish(tif_path: Path) -> dict:
 
         return {
             "published": True,
-            "wms_url": f"{GEOSERVER_URL}/{GEOSERVER_WORKSPACE}/wms",
+            "wms_url": f"{GEOSERVER_PUBLIC_URL}/{GEOSERVER_WORKSPACE}/wms",
             "layer": f"{GEOSERVER_WORKSPACE}:{GEOSERVER_LAYER}",
             "tif_path": str(tif_path),
         }

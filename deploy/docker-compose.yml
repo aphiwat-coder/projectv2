@@ -1,0 +1,51 @@
+services:
+  api:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    environment:
+      GEOSERVER_ENABLED: "true"
+      GEOSERVER_URL: "http://geoserver:8080/geoserver"
+      GEOSERVER_PUBLIC_URL: "${GEOSERVER_PUBLIC_URL:-http://localhost/geoserver}"
+      GEOSERVER_USER: "admin"
+      GEOSERVER_PASS: "${GEOSERVER_PASS:-geoserver}"
+      GEOSERVER_WORKSPACE: "sugarcane"
+      GEOSERVER_STORE: "suitability_store"
+      GEOSERVER_LAYER: "suitability_result"
+      GEOSERVER_STYLE: "suitability_fao"
+      GEOSERVER_DATA_DIR: "/shared/output"
+    volumes:
+      - geoserver_shared:/shared
+    depends_on:
+      - geoserver
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.28.2
+    restart: unless-stopped
+    environment:
+      SKIP_DEMO_DATA: "true"
+      GEOSERVER_ADMIN_USER: "admin"
+      GEOSERVER_ADMIN_PASSWORD: "${GEOSERVER_PASS:-geoserver}"
+    volumes:
+      - geoserver_data:/opt/geoserver_data
+      - geoserver_shared:/shared
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  frontend:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - geoserver
+    ports:
+      - "80:80"
+    volumes:
+      - ../frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  geoserver_data:
+  geoserver_shared:

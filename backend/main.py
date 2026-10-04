@@ -25,6 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 class AHPRequest(BaseModel):
     factors: list[str]
     matrix: list[list[float]]

@@ -2,10 +2,10 @@
 // ตรวจอัตโนมัติ: ถ้าเปิดหน้าเว็บจากเครื่องตัวเอง (localhost / XAMPP / Live Server / เปิดไฟล์ตรงๆ)
 // ให้ต่อ backend ที่รันในเครื่อง ถ้าเปิดจากเว็บที่ deploy แล้วจึงใช้ URL บนเซิร์ฟเวอร์
 // แก้ค่าตรงนี้ได้ถ้าใช้พอร์ตอื่น
-const LOCAL_BACKEND = "http://127.0.0.1:8000";
-const REMOTE_BACKEND = "https://webwijai-ahp.onrender.com";
+const LOCAL_BACKEND = window.APP_CONFIG?.localBackend || "http://127.0.0.1:8000";
+const REMOTE_BACKEND = window.APP_CONFIG?.remoteBackend || "";
 const _isLocal = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
-const BACKEND_URL = _isLocal ? LOCAL_BACKEND : REMOTE_BACKEND;
+const BACKEND_URL = _isLocal ? LOCAL_BACKEND : (REMOTE_BACKEND || window.location.origin);
 
 function showToast(message, type = "info", duration = 4500) {
     const container = document.getElementById("toastContainer");
