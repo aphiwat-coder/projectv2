@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เกี่ยวกับงานวิจัย | Sugarcane AHP WebGIS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/landing.css">
+    <style>
+        .about-card { max-width: 760px; text-align: left; }
+        .about-card h1 { font-size: 1.4rem; margin-bottom: 4px; }
+        .about-card h2 { font-size: 1rem; font-weight: 400; color: #2e7d32; margin-bottom: 20px; }
+        .about-card h3 { font-size: 1rem; color: #1b5e20; margin: 20px 0 8px; }
+        .about-card p, .about-card li { font-size: 0.9rem; color: #333; line-height: 1.7; }
+        .about-card ul { padding-left: 20px; margin-bottom: 10px; }
+        .factor-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.85rem; }
+        .factor-table th, .factor-table td { padding: 6px 8px; border-bottom: 1px solid #c8e6c9; text-align: left; }
+        .factor-table th { background: #e8f5e9; color: #1b5e20; }
+        .back-link { display: inline-block; margin-top: 24px; color: #2e7d32; text-decoration: none; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="hero-section">
+        <div class="glass-card about-card">
+            <div class="project-badge">วิทยาลัยการคอมพิวเตอร์ ม.ขอนแก่น</div>
+            <h1>ระบบสนับสนุนการตัดสินใจบน WebGIS ร่วมกับเทคนิค AHP</h1>
+            <h2>สำหรับการประเมินศักยภาพที่ดินเพื่อการปลูกอ้อย ในพื้นที่จังหวัดขอนแก่น</h2>
+
+            <p>
+                งานวิจัยนี้พัฒนาระบบสนับสนุนการตัดสินใจเชิงพื้นที่บนเครือข่าย (WebGIS)
+                สำหรับประเมินศักยภาพที่ดินในการปลูกอ้อยโรงงานในพื้นที่จังหวัดขอนแก่น
+                โดยบูรณาการกระบวนการวิเคราะห์ลำดับชั้น (Analytic Hierarchy Process: AHP)
+                เข้ากับปัจจัยด้านกายภาพ ดิน ภูมิอากาศ และระยะทางขนส่ง เพื่อแก้ปัญหา
+                ต้นทุนโลจิสติกส์และการปลูกอ้อยในพื้นที่ที่ไม่เหมาะสม
+            </p>
+
+            <h3>ปัจจัยที่ใช้ในการวิเคราะห์ (6 ปัจจัย)</h3>
+            <table class="factor-table">
+                <tr><th>ปัจจัย</th><th>น้ำหนัก AHP</th></tr>
+                <tr><td>ปริมาณน้ำฝน</td><td>33.6%</td></tr>
+                <tr><td>แหล่งน้ำ</td><td>30.9%</td></tr>
+                <tr><td>ประเภทดิน</td><td>20.5%</td></tr>
+                <tr><td>การคมนาคม</td><td>6.5%</td></tr>
+                <tr><td>พื้นที่น้ำท่วม</td><td>4.4%</td></tr>
+                <tr><td>พื้นที่เสี่ยงภัยแล้ง</td><td>4.0%</td></tr>
+            </table>
+            <p style="font-size:0.8rem; color:#666;">
+                (น้ำหนักข้างต้นคำนวณจากกระบวนการ AHP ผ่านการตรวจสอบ Consistency Ratio
+                CR = 0.086 ซึ่งน้อยกว่าเกณฑ์มาตรฐาน 0.10 — ผู้ใช้สามารถปรับเปลี่ยนค่า
+                เปรียบเทียบรายคู่เองในหน้าระบบเพื่อคำนวณน้ำหนักใหม่ได้)
+            </p>
+
+            <h3>วิธีการวิเคราะห์</h3>
+            <p>
+                ใช้เทคนิค Weighted Linear Combination (WLC) นำคะแนนความเหมาะสมของแต่ละ
+                ปัจจัย (ที่ผ่านการจัดกลุ่มคะแนนตามมาตรฐาน FAO และกรมพัฒนาที่ดิน) มาคูณ
+                กับน้ำหนักจาก AHP แล้วรวมกันเป็นคะแนนความเหมาะสมโดยรวมของพื้นที่
+            </p>
+
+            <h3>คณะผู้จัดทำ</h3>
+            <ul>
+                <li>นายศุภวัชร บุปผเวส — รหัสนักศึกษา 663380329-7</li>
+                <li>นายอภิวัฒน์ เมืองสนธิ์ — รหัสนักศึกษา 663380332-8</li>
+            </ul>
+            <p>อาจารย์ที่ปรึกษา: อ.ดร.ศรัณย์ อภิชนตระกูล</p>
+            <p style="font-size:0.85rem; color:#666;">
+                วิชา CP373 701 ระเบียบวิธีวิจัยทางภูมิสารสนเทศศาสตร์<br>
+                สาขาวิชาวิทยาการคอมพิวเตอร์ วิทยาลัยการคอมพิวเตอร์ มหาวิทยาลัยขอนแก่น<br>
+                ปีการศึกษา 2568
+            </p>
+
+            <a href="index.html" class="back-link">← กลับหน้าแรก</a>
+        </div>
+    </div>
+</body>
+</html>

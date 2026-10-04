@@ -1,0 +1,126 @@
+/* ตั้งค่าพื้นฐานและฟอนต์ */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Prompt', sans-serif;
+}
+
+/* พื้นหลังหน้าแรก (ไล่สีโทนสีเขียวใบอ้อย) */
+.hero-section {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #e8f5e9 0%, #a5d6a7 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+/* การ์ดตรงกลางสไตล์ Glassmorphism (กระจกขุ่น) */
+.glass-card {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 24px;
+    padding: 50px 40px;
+    max-width: 800px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+}
+
+.project-badge {
+    display: inline-block;
+    background-color: #2e7d32;
+    color: white;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 20px;
+    letter-spacing: 0.5px;
+}
+
+h1 {
+    color: #1b5e20;
+    font-size: 2.2rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+h2 {
+    color: #e65100; /* สีส้มทอง ตัดกับสีเขียว */
+    font-size: 1.4rem;
+    font-weight: 400;
+    margin-bottom: 24px;
+}
+
+.description {
+    color: #455a64;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 40px;
+    padding: 0 20px;
+}
+
+/* จัดกลุ่มปุ่มกดให้สวยงาม */
+.action-buttons {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 40px;
+}
+
+.btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 28px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background-color: #4caf50;
+    color: white;
+    box-shadow: 0 8px 20px rgba(76, 175, 80, 0.3);
+}
+
+.btn-primary:hover {
+    background-color: #388e3c;
+    transform: translateY(-3px);
+    box-shadow: 0 12px 25px rgba(56, 142, 60, 0.4);
+}
+
+.btn-secondary {
+    background-color: #ffffff;
+    color: #4caf50;
+    border: 2px solid #4caf50;
+}
+
+.btn-secondary:hover {
+    background-color: #e8f5e9;
+    transform: translateY(-3px);
+}
+
+/* เครดิตด้านล่าง */
+.footer-credit {
+    font-size: 0.85rem;
+    color: #78909c;
+    border-top: 1px solid #cfd8dc;
+    padding-top: 20px;
+    margin-top: 20px;
+}
+
+/* รองรับการแสดงผลบนมือถือ */
+@media (max-width: 600px) {
+    .action-buttons {
+        flex-direction: column;
+    }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.2rem; }
+}

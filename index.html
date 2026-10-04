@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sugarcane AHP | ระบบประเมินศักยภาพที่ดินปลูกอ้อย</title>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/landing.css">
+    
+    <!-- เพิ่ม CSS สำหรับหน้าต่าง Modal คู่มือการใช้งานโดยเฉพาะ -->
+    <style>
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; backdrop-filter: blur(3px); display: none; }
+        .modal-content { background: #fff; padding: 30px; border-radius: 16px; max-width: 650px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.2); position: relative; margin: 5vh auto; color: #333; }
+        .guide-step { display: flex; align-items: flex-start; margin-bottom: 20px; text-align: left; background: #fbfcfc; padding: 15px; border-radius: 10px; border: 1px solid #eaeeec; }
+        .step-num { background: #2e7d32; color: white; width: 35px; height: 35px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; margin-right: 15px; flex-shrink: 0; }
+        .step-content h4 { margin: 0 0 5px 0; color: #2c3e50; font-size: 1.1rem; }
+        .step-content p { margin: 0; color: #555; font-size: 0.95rem; line-height: 1.5; font-weight: normal; }
+        .icon-demo { background: #eaeeec; padding: 3px 8px; border-radius: 5px; font-size: 0.9rem; }
+        #closeGuideBtn { position: absolute; top: 20px; right: 20px; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #999; }
+        #closeGuideBtn:hover { color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="hero-section">
+        <div class="glass-card">
+            <div class="project-badge">วิทยาลัยการคอมพิวเตอร์ ม.ขอนแก่น</div>
+            <h1>ระบบสนับสนุนการตัดสินใจบน WebGIS</h1>
+            <h2>ประเมินศักยภาพที่ดินเพื่อการปลูกอ้อยโรงงาน จังหวัดขอนแก่น</h2>
+            <p class="description">
+                บูรณาการกระบวนการวิเคราะห์ลำดับชั้น (AHP) ร่วมกับข้อมูลเชิงพื้นที่ทางกายภาพและระยะทางขนส่ง 
+                เพื่อช่วยให้เกษตรกรและผู้ประกอบการวางแผนโซนนิ่ง (Zoning) ได้อย่างแม่นยำ
+            </p>
+            
+            <div class="action-buttons">
+                <!-- ลิงก์ไปยังหน้าแผนที่ -->
+                <a href="app.html" class="btn btn-primary">
+                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    เข้าสู่ระบบประเมินพื้นที่ (WebGIS)
+                </a>
+                
+                <!-- ปุ่มเปิดคู่มือการใช้งาน -->
+                <button id="openGuideBtn" class="btn btn-secondary" style="cursor: pointer;">📖 คู่มือการใช้งาน</button>
+                
+                <a href="about.html" class="btn btn-secondary">เกี่ยวกับงานวิจัย</a>
+            </div>
+
+            <div class="footer-credit">
+                พัฒนาโดย นายศุภวัชร บุปผเวส และ นายอภิวัฒน์ เมืองสนธิ์<br>
+                อาจารย์ที่ปรึกษา: อ.ดร.ศรัณย์ อภิชนตระกูล
+            </div>
+        </div>
+    </div>
+
+    <!-- หน้าต่างคู่มือการใช้งาน (Modal) -->
+    <div id="guideModal" class="modal">
+        <div class="modal-content">
+            <button id="closeGuideBtn">&times;</button>
+            <h3 style="margin-top: 0; color: #1b5e20; font-size: 1.3rem; border-bottom: 2px solid #e8f5e9; padding-bottom: 10px; margin-bottom: 20px; text-align: left;">
+                📖 วิธีการใช้งานระบบ (สำหรับผู้เริ่มต้น)
+            </h3>
+            
+            <div class="guide-step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <h4>นำเข้าข้อมูลแผนที่ (Upload)</h4>
+                    <p>ไปที่เมนูขวามือ คลิกที่ไอคอน <span class="icon-demo">📎</span> เพื่ออัปโหลดไฟล์ (รองรับไฟล์ <b>.tif</b> หรือไฟล์ Shapefile ที่ต้องบีบอัดเป็น <b>.zip</b> ก่อนอัปโหลด)</p>
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <h4>กำหนดเกณฑ์คะแนน (Classify)</h4>
+                    <p>หลังจากระบบประมวลผลไฟล์เสร็จสิ้น ให้คลิกไอคอน <span class="icon-demo">🎯</span> เพื่อกำหนดช่วงข้อมูลและระบุคะแนน (เช่น ห่างแหล่งน้ำ 0-1 กม. ให้ 10 คะแนน)</p>
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <h4>เปรียบเทียบปัจจัย (AHP Matrix)</h4>
+                    <p>คลิกปุ่ม <b>"สร้าง Matrix"</b> เพื่อเปิดตารางเปรียบเทียบค่าน้ำหนักความสำคัญรายคู่ เมื่อกรอกเสร็จให้คลิก <b>"1. คำนวณน้ำหนัก"</b></p>
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">4</div>
+                <div class="step-content">
+                    <h4>ประมวลผลแผนที่ (Overlay)</h4>
+                    <p>คลิกปุ่ม <b>"2. คำนวณแผนที่"</b> ระบบจะวิเคราะห์ข้อมูลทั้งหมดและแสดงพื้นที่เหมาะสมที่สุดบนแผนที่</p>
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">5</div>
+                <div class="step-content">
+                    <h4>ดาวน์โหลดผลลัพธ์ (Download)</h4>
+                    <p>เลือกนามสกุลไฟล์ที่ต้องการในกล่องดาวน์โหลดด้านล่าง (เช่น Shapefile, GeoJSON) แล้วนำไปใช้งานต่อในโปรแกรม GIS ได้ทันที</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- สคริปต์ควบคุมการเปิด-ปิดหน้าต่าง Modal -->
+    <script>
+        const modal = document.getElementById('guideModal');
+        const openBtn = document.getElementById('openGuideBtn');
+        const closeBtn = document.getElementById('closeGuideBtn');
+
+        openBtn.onclick = function() {
+            modal.style.display = 'block';
+        }
+        
+        closeBtn.onclick = function() {
+            modal.style.display = 'none';
+        }
+        
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
