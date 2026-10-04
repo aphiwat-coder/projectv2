@@ -3,5 +3,5 @@
 // Set it to the public API URL when the frontend is hosted separately.
 window.APP_CONFIG = {
     localBackend: "http://127.0.0.1:8000",
-    remoteBackend: "",
+    remoteBackend: "https://projectv2-1.onrender.com",
 };
