@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "name": "khonkaen-demo-layer",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "พื้นที่ตัวอย่างตอนกลางจังหวัดขอนแก่น",
+        "source": "demo-upload"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [102.55, 16.15],
+            [102.95, 16.15],
+            [102.95, 16.60],
+            [102.55, 16.60],
+            [102.55, 16.15]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "พื้นที่ตัวอย่างด้านตะวันตก",
+        "source": "demo-upload"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [102.05, 16.55],
+            [102.35, 16.55],
+            [102.35, 16.90],
+            [102.05, 16.90],
+            [102.05, 16.55]
+          ]
+        ]
+      }
+    }
+  ]
+}
