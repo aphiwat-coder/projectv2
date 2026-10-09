@@ -42,6 +42,19 @@ const FACTOR_LABELS_TH = {
 };
 function displayLabel(key) { return FACTOR_LABELS_TH[key] || key; }
 window.displayLabel = displayLabel;
+
+function normalizeFactorName(value) {
+    return String(value || "").trim().toLocaleLowerCase();
+}
+
+function factorNameExists(name) {
+    const normalized = normalizeFactorName(name);
+    return criteria.some((factor) => {
+        return normalizeFactorName(factor) === normalized
+            || normalizeFactorName(displayLabel(factor)) === normalized;
+    });
+}
+
 let layerState = {};
 let classifyingFactor = null;
 let lastAhpWeights = null;
@@ -143,7 +156,7 @@ document.getElementById("addCriteria").onclick = function () {
     const input = document.getElementById("newCriteriaInput");
     const name = input.value.trim();
     if (!name) return;
-    if (criteria.includes(name)) {
+    if (factorNameExists(name)) {
         showToast("มีปัจจัยชื่อนี้อยู่แล้ว", "warning");
         return;
     }
@@ -622,29 +635,47 @@ document.querySelectorAll(".dl-type-btn").forEach(btn => {
     };
 });
 
-document.getElementById("downloadBtn").onclick = function() {
+document.getElementById("downloadBtn").onclick = async function() {
     if (this.disabled) return;
-    
-    // เปลี่ยนข้อความในปุ่มแทนการเด้ง alert() เพื่อป้องกันเบราว์เซอร์บล็อก
+
     const btn = this;
     const originalText = btn.textContent;
     btn.textContent = `⏳ กำลังโหลด ${selectedDownloadType}...`;
-    btn.style.backgroundColor = "#ff9800"; // เปลี่ยนเป็นสีส้มชั่วคราว
+    btn.style.backgroundColor = "#ff9800";
     btn.disabled = true;
 
-    // สร้างลิงก์จำลองเพื่อบังคับดาวน์โหลดไฟล์
-    const downloadUrl = `${BACKEND_URL}/api/download?type=${selectedDownloadType}`;
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    // ซ่อนลิงก์และจำลองการคลิก
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+        const downloadUrl = `${BACKEND_URL}/api/download?type=${encodeURIComponent(selectedDownloadType)}`;
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+            let message = `เซิร์ฟเวอร์ตอบกลับ ${response.status}`;
+            try {
+                const error = await response.json();
+                if (error.detail) message = error.detail;
+            } catch (_) {}
+            throw new Error(message);
+        }
 
-    // คืนสถานะปุ่มกลับมาเป็นเหมือนเดิมหลังจากผ่านไป 5 วินาที
-    setTimeout(() => {
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = {
+            Shapefile: "suitability_map_shp.zip",
+            GeoJSON: "suitability_map.geojson",
+            CSV: "suitability_map.csv",
+            KML: "suitability_map.kml",
+        }[selectedDownloadType] || "suitability_map";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        showToast(`ดาวน์โหลด ${selectedDownloadType} สำเร็จ`, "success");
+    } catch (error) {
+        showToast(`ดาวน์โหลด ${selectedDownloadType} ไม่สำเร็จ: ${error.message}`, "error", 7000);
+    } finally {
         btn.textContent = originalText;
-        btn.style.backgroundColor = ""; 
+        btn.style.backgroundColor = "";
         btn.disabled = false;
-    }, 5000);
+    }
 };

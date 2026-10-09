@@ -1,4 +1,5 @@
 import base64
+import csv
 import io
 import json
 import pathlib
@@ -204,8 +205,9 @@ def load_default_factory_layer():
 
 @app.on_event("startup")
 def startup_event():
-    pass  # <--- เติมคำว่า pass เข้าไปบรรทัดนี้ครับ
-    # load_default_factory_layer()
+    # โหลดชั้นระยะทางจากโรงงานที่มีอยู่ใน repository ให้พร้อมใช้ตั้งแต่เริ่มระบบ
+    # ฟังก์ชันจะข้ามอย่างปลอดภัยถ้าไฟล์หรือไลบรารีเสริมไม่พร้อม
+    load_default_factory_layer()
 
 
 def _normalize(a: np.ndarray) -> np.ndarray:
@@ -404,14 +406,12 @@ def bounds_list() -> list[float]:
 #  ทำให้ผลลัพธ์ 2 ที่ไม่ตรงกัน — ปรับให้ใช้ชุดเดียวกันคือ 0.40/0.55/0.70)
 # ==================================================================
 FAO_CLASSES = [
-    # ใช้สีเขียวสว่าง (#55FF00) สำหรับ S1
-    {"code": 4, "cls": "S1", "label": "เหมาะสมสูง",       "color": "#55FF00", "min": 3.50, "max": 4.01},
-    # ใช้สีเหลือง (#FFFF00) สำหรับ S2
-    {"code": 3, "cls": "S2", "label": "เหมาะสมปานกลาง",   "color": "#FFFF00", "min": 2.50, "max": 3.50},
-    # ใช้สีส้ม (#FFAA00) สำหรับ S3
-    {"code": 2, "cls": "S3", "label": "เหมาะสมน้อย",      "color": "#FFAA00", "min": 1.50, "max": 2.50},
-    # ใช้สีแดง (#FF0000) สำหรับ N
-    {"code": 1, "cls": "N",  "label": "ไม่เหมาะสม",        "color": "#FF0000", "min": -0.01, "max": 1.50},
+    # คะแนน WLC เป็นค่า normalized 0-1 (น้ำหนักรวมกันเป็น 1)
+    # จึงต้องใช้ช่วงเดียวกับ GeoServer SLD และสถิติด้านล่าง
+    {"code": 4, "cls": "S1", "label": "เหมาะสมสูง",       "color": "#55FF00", "min": 0.70, "max": 1.01},
+    {"code": 3, "cls": "S2", "label": "เหมาะสมปานกลาง",   "color": "#FFFF00", "min": 0.55, "max": 0.70},
+    {"code": 2, "cls": "S3", "label": "เหมาะสมน้อย",      "color": "#FFAA00", "min": 0.40, "max": 0.55},
+    {"code": 1, "cls": "N",  "label": "ไม่เหมาะสม",        "color": "#FF0000", "min": -0.01, "max": 0.40},
 ]
 
 
@@ -773,12 +773,16 @@ def calculate_suitability(data: SuitabilityRequest):
     # ถ้า GeoServer ปิดอยู่/ต่อไม่ติด จะไม่ทำให้ระบบล่ม แค่คืน published=false
     # แล้วหน้าเว็บจะใช้ภาพ PNG (image_base64) แสดงผลแทนตามเดิม
     geoserver_info = {"published": False, "reason": "disabled"}
-    try:
-        tif_path = gs.write_result_geotiff(suitability, province_mask, KHONKAEN_BOUNDS)
-        geoserver_info = gs.publish(tif_path)
-        geoserver_info["tif_path"] = str(tif_path)
-    except Exception as e:
-        geoserver_info = {"published": False, "reason": f"{type(e).__name__}: {e}"}
+    # Render โหมดปกติปิด GeoServer อยู่แล้ว จึงไม่ควร import/เขียน GeoTIFF
+    # ในทุก request เพราะ native rasterio อาจไม่พร้อมและทำให้ผู้ใช้เห็น error
+    # ทั้งที่ fallback PNG ทำงานได้ตามปกติ
+    if gs.GEOSERVER_ENABLED:
+        try:
+            tif_path = gs.write_result_geotiff(suitability, province_mask, KHONKAEN_BOUNDS)
+            geoserver_info = gs.publish(tif_path)
+            geoserver_info["tif_path"] = str(tif_path)
+        except Exception as e:
+            geoserver_info = {"published": False, "reason": f"{type(e).__name__}: {e}"}
 
     # แก้บั๊ก: เดิมคิด % จากทั้งกรอบสี่เหลี่ยม ซึ่ง ~64% เป็นพื้นที่นอกจังหวัด
     # (ที่ถูกซ่อนไม่ให้เห็นบนแผนที่อยู่แล้ว) ทำให้ตัวเลขที่รายงานผิดจากความจริงมาก
@@ -815,6 +819,131 @@ def calculate_suitability(data: SuitabilityRequest):
     }
 
 # API สำหรับดาวน์โหลดแผนที่ผลลัพธ์เป็นไฟล์ต่างๆ
+def _fallback_grid_features(fao_array: np.ndarray) -> list[dict]:
+    """สร้าง GeoJSON features จากกริดโดยไม่พึ่ง rasterio/geopandas/fiona
+
+    ใช้การรวมช่วง cell ที่มีรหัสเดียวกันทั้งแนวนอนและแนวตั้งเพื่อลดจำนวน
+    polygon เมื่อ native GIS libraries ใช้งานไม่ได้บนระบบ deploy
+    """
+    h, w = fao_array.shape
+    mask = get_province_mask()
+    dx = (KHONKAEN_BOUNDS["east"] - KHONKAEN_BOUNDS["west"]) / w
+    dy = (KHONKAEN_BOUNDS["north"] - KHONKAEN_BOUNDS["south"]) / h
+    active: dict[tuple[int, int, int], int] = {}
+    features: list[dict] = []
+
+    def finish(key: tuple[int, int, int], row_start: int, row_end: int) -> None:
+        col_start, col_end, score = key
+        west = KHONKAEN_BOUNDS["west"] + col_start * dx
+        east = KHONKAEN_BOUNDS["west"] + col_end * dx
+        north = KHONKAEN_BOUNDS["north"] - row_start * dy
+        south = KHONKAEN_BOUNDS["north"] - row_end * dy
+        ring = [[west, south], [east, south], [east, north], [west, north], [west, south]]
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [ring]},
+            "properties": {"score": score},
+        })
+
+    for row in range(h + 1):
+        current: dict[tuple[int, int, int], int] = {}
+        if row < h:
+            col = 0
+            while col < w:
+                if not mask[row, col] or int(fao_array[row, col]) <= 0:
+                    col += 1
+                    continue
+                score = int(fao_array[row, col])
+                start = col
+                col += 1
+                while col < w and mask[row, col] and int(fao_array[row, col]) == score:
+                    col += 1
+                current[(start, col, score)] = active.get((start, col, score), row)
+
+        for key, row_start in active.items():
+            if key not in current:
+                finish(key, row_start, row)
+        active = current
+
+    return features
+
+
+def _fallback_download(type: str, fao_array: np.ndarray) -> StreamingResponse:
+    features = _fallback_grid_features(fao_array)
+    if type == "GeoJSON":
+        payload = json.dumps(
+            {"type": "FeatureCollection", "features": features},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return StreamingResponse(
+            io.BytesIO(payload),
+            media_type="application/geo+json",
+            headers={"Content-Disposition": "attachment; filename=suitability_map.geojson"},
+        )
+
+    if type == "CSV":
+        text = io.StringIO()
+        writer = csv.writer(text)
+        writer.writerow(["score", "longitude", "latitude"])
+        for feature in features:
+            ring = feature["geometry"]["coordinates"][0]
+            longitude = sum(point[0] for point in ring[:-1]) / 4
+            latitude = sum(point[1] for point in ring[:-1]) / 4
+            writer.writerow([feature["properties"]["score"], longitude, latitude])
+        return StreamingResponse(
+            io.BytesIO(text.getvalue().encode("utf-8-sig")),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=suitability_map.csv"},
+        )
+
+    if type == "KML":
+        placemarks = []
+        for feature in features:
+            score = feature["properties"]["score"]
+            coords = " ".join(f"{lon},{lat},0" for lon, lat in feature["geometry"]["coordinates"][0])
+            placemarks.append(
+                f"<Placemark><name>{score}</name><Polygon><outerBoundaryIs><LinearRing>"
+                f"<coordinates>{coords}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>"
+            )
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+            + "".join(placemarks)
+            + "</Document></kml>"
+        ).encode("utf-8")
+        return StreamingResponse(
+            io.BytesIO(payload),
+            media_type="application/vnd.google-earth.kml+xml",
+            headers={"Content-Disposition": "attachment; filename=suitability_map.kml"},
+        )
+
+    if type == "Shapefile":
+        try:
+            import shapefile
+        except ImportError as exc:
+            raise HTTPException(500, "ระบบส่งออก Shapefile ต้องติดตั้งแพ็กเกจ pyshp") from exc
+        buf = io.BytesIO()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = os.path.join(tmpdir, "suitability_map")
+            writer = shapefile.Writer(base, shapeType=shapefile.POLYGON)
+            writer.field("score", "N", size=1, decimal=0)
+            for feature in features:
+                writer.poly([feature["geometry"]["coordinates"][0]])
+                writer.record(feature["properties"]["score"])
+            writer.close()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+                for filename in os.listdir(tmpdir):
+                    archive.write(os.path.join(tmpdir, filename), filename)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=suitability_map_shp.zip"},
+        )
+
+    raise HTTPException(400, "ยังไม่รองรับไฟล์รูปแบบนี้")
+
+
 @app.get("/api/download")
 def download_result(type: str):
     if last_suitability_result.get("array") is None:
@@ -836,7 +965,10 @@ def download_result(type: str):
         import geopandas as gpd
         import fiona
     except ImportError as exc:
-        raise HTTPException(500, "กรุณาติดตั้งแพ็กเกจ: pip install rasterio geopandas fiona shapely") from exc
+        # Render บาง environment ไม่มี libexpat ที่ native GIS wheels ต้องใช้.
+        # ส่งออกด้วย pure-Python fallback แทนการให้ผู้ใช้เจอ JSON 500 หรือถูกพา
+        # ออกจากหน้าเว็บไปยัง backend โดยตรง
+        return _fallback_download(type, fao_array)
 
     # เปิดการเขียนไฟล์ KML
     fiona.drvsupport.supported_drivers['KML'] = 'rw'

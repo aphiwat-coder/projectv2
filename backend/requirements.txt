@@ -9,3 +9,5 @@ shapely>=2.0
 geopandas
 fiona
 requests
+# Pure-Python Shapefile writer used when Render lacks native GDAL/expat wheels.
+pyshp>=2.3
