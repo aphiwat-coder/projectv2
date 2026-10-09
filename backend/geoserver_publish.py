@@ -39,6 +39,11 @@ GEOSERVER_WORKSPACE = os.getenv("GEOSERVER_WORKSPACE", "sugarcane")
 GEOSERVER_STORE = os.getenv("GEOSERVER_STORE", "suitability_store")
 GEOSERVER_LAYER = os.getenv("GEOSERVER_LAYER", "suitability_result")
 GEOSERVER_STYLE = os.getenv("GEOSERVER_STYLE", "suitability_fao")
+# "upload" sends the GeoTIFF bytes through the REST API and works when the
+# API and GeoServer run in separate containers/services (for example Render).
+# "external" keeps the legacy shared-filesystem behaviour used by older
+# Compose deployments.
+GEOSERVER_UPLOAD_MODE = os.getenv("GEOSERVER_UPLOAD_MODE", "upload").strip().lower()
 
 # โฟลเดอร์ที่จะเขียนไฟล์ .tif ลงไป — ต้องเป็นพาธที่เครื่อง GeoServer อ่านได้
 # ถ้าไม่ตั้ง จะใช้ backend/output/ ในโปรเจกต์นี้ (เหมาะกับกรณีรันบนเครื่องเดียวกัน)
@@ -154,6 +159,7 @@ def check_status() -> dict:
         if r.status_code == 200:
             return {"enabled": True, "connected": True,
                     "url": GEOSERVER_URL, "workspace": GEOSERVER_WORKSPACE,
+                    "upload_mode": GEOSERVER_UPLOAD_MODE,
                     "message": "เชื่อมต่อ GeoServer สำเร็จ"}
         if r.status_code == 401:
             return {"enabled": True, "connected": False,
@@ -195,13 +201,56 @@ def _ensure_style(requests) -> None:
     )
 
 
+def _upload_geotiff(requests, tif_path: Path):
+    """Upload a GeoTIFF to GeoServer without requiring a shared filesystem."""
+    endpoint = (f"{GEOSERVER_URL}/rest/workspaces/{GEOSERVER_WORKSPACE}"
+                f"/coveragestores/{GEOSERVER_STORE}/file.geotiff")
+    payload = tif_path.read_bytes()
+    params = {"configure": "first", "coverageName": GEOSERVER_LAYER}
+    response = requests.put(
+        endpoint,
+        params=params,
+        data=payload,
+        headers={"Content-Type": "image/tiff"},
+        auth=_auth(), timeout=TIMEOUT * 8,
+    )
+
+    # GeoServer may keep an existing coverage store configured already.  A
+    # second request with configure=none replaces the file in that store
+    # while retaining its published coverage metadata.
+    if response.status_code not in (200, 201, 202):
+        params["configure"] = "none"
+        response = requests.put(
+            endpoint,
+            params=params,
+            data=payload,
+            headers={"Content-Type": "image/tiff"},
+            auth=_auth(), timeout=TIMEOUT * 8,
+        )
+    return response
+
+
+def _publish_external_geotiff(requests, tif_path: Path):
+    """Publish using a path visible to GeoServer (legacy shared-volume mode)."""
+    url = (f"{GEOSERVER_URL}/rest/workspaces/{GEOSERVER_WORKSPACE}"
+           f"/coveragestores/{GEOSERVER_STORE}/external.geotiff"
+           f"?configure=first&coverageName={GEOSERVER_LAYER}")
+    return requests.put(
+        url,
+        data=tif_path.resolve().as_uri(),
+        headers={"Content-type": "text/plain"},
+        auth=_auth(), timeout=TIMEOUT * 4,
+    )
+
+
 def publish(tif_path: Path) -> dict:
     """
     สั่ง GeoServer ให้ publish ไฟล์ .tif เป็นเลเยอร์ WMS
 
-    ใช้วิธี "external.geotiff" คือบอก path ของไฟล์ให้ GeoServer ไปอ่านเอง
-    (ไม่ได้อัปโหลดตัวไฟล์ข้ามเน็ตเวิร์ก) จึงเร็วและใช้ซ้ำ path เดิมได้ทุกครั้ง
-    ที่คำนวณใหม่ — GeoServer จะเห็นข้อมูลใหม่ทันทีโดยไม่ต้องสร้าง store ใหม่
+    ค่าเริ่มต้นใช้ REST file upload เพื่อให้ API และ GeoServer อยู่คนละ
+    container/service ได้ โดยไม่ต้องพึ่ง shared volume (เช่นบน Render)
+    ถ้าตั้ง GEOSERVER_UPLOAD_MODE=external จะใช้วิธีเดิมที่ส่ง path ให้
+    GeoServer ซึ่งเหมาะกับ Docker Compose ที่ mount volume ร่วมกัน
 
     คืนค่า dict ที่มี wms_url + layer เมื่อสำเร็จ / มี error เมื่อไม่สำเร็จ
     """
@@ -217,16 +266,10 @@ def publish(tif_path: Path) -> dict:
         _ensure_workspace(requests)
         _ensure_style(requests)
 
-        # ชี้ store ไปที่ไฟล์ .tif (สร้างใหม่ถ้ายังไม่มี / อัปเดตถ้ามีแล้ว)
-        url = (f"{GEOSERVER_URL}/rest/workspaces/{GEOSERVER_WORKSPACE}"
-               f"/coveragestores/{GEOSERVER_STORE}/external.geotiff"
-               f"?configure=first&coverageName={GEOSERVER_LAYER}")
-        r = requests.put(
-            url,
-            data=tif_path.resolve().as_uri(),  # file:///... ตามรูปแบบที่ GeoServer ต้องการ
-            headers={"Content-type": "text/plain"},
-            auth=_auth(), timeout=TIMEOUT * 4,  # ขั้นนี้ช้ากว่าขั้นอื่น
-        )
+        if GEOSERVER_UPLOAD_MODE == "external":
+            r = _publish_external_geotiff(requests, tif_path)
+        else:
+            r = _upload_geotiff(requests, tif_path)
         if r.status_code not in (200, 201, 202):
             return {"published": False,
                     "reason": f"publish ไม่สำเร็จ (HTTP {r.status_code}) {r.text[:200]}"}
@@ -255,6 +298,7 @@ def publish(tif_path: Path) -> dict:
             "wms_url": f"{GEOSERVER_PUBLIC_URL}/{GEOSERVER_WORKSPACE}/wms",
             "layer": f"{GEOSERVER_WORKSPACE}:{GEOSERVER_LAYER}",
             "tif_path": str(tif_path),
+            "upload_mode": GEOSERVER_UPLOAD_MODE,
         }
     except Exception as e:
         return {"published": False,

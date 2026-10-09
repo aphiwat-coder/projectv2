@@ -11,7 +11,47 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.7"
       - key: GEOSERVER_ENABLED
-        value: "false"
+        value: "true"
+      # The API uploads GeoTIFF bytes through REST, so it does not need a
+      # shared Render disk with GeoServer.
+      - key: GEOSERVER_URL
+        value: "http://projectv2-geoserver:8080/geoserver"
+      - key: GEOSERVER_PUBLIC_URL
+        value: "https://projectv2-geoserver.onrender.com/geoserver"
+      - key: GEOSERVER_UPLOAD_MODE
+        value: "upload"
+      - key: GEOSERVER_USER
+        value: "admin"
+      - key: GEOSERVER_PASS
+        value: "geoserver"
+      - key: GEOSERVER_WORKSPACE
+        value: "sugarcane"
+      - key: GEOSERVER_STORE
+        value: "suitability_store"
+      - key: GEOSERVER_LAYER
+        value: "suitability_result"
+      - key: GEOSERVER_STYLE
+        value: "suitability_fao"
+
+  # Public WMS endpoint.  The API talks to this service over Render's
+  # private network while Leaflet uses GEOSERVER_PUBLIC_URL above.
+  - type: web
+    name: projectv2-geoserver
+    runtime: image
+    region: singapore
+    plan: free
+    image:
+      url: docker.osgeo.org/geoserver:2.28.2
+    healthCheckPath: /geoserver/web/
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: SKIP_DEMO_DATA
+        value: "true"
+      - key: GEOSERVER_ADMIN_USER
+        value: "admin"
+      - key: GEOSERVER_ADMIN_PASSWORD
+        value: "geoserver"
 
   - type: web
     name: projectv2-frontend

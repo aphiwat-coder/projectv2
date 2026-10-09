@@ -13,6 +13,10 @@
 **ระบบทำงานได้แม้ยังไม่ได้ติดตั้ง GeoServer** — จะใช้โหมดภาพ PNG ไปก่อน
 พอเปิด GeoServer แล้วค่อยสลับเป็น WMS อัตโนมัติ ไม่ต้องแก้โค้ด
 
+ระบบส่งผลลัพธ์ GeoTIFF ผ่าน REST upload เป็นค่าเริ่มต้น จึงใช้ได้แม้ FastAPI
+กับ GeoServer อยู่คนละ container หรือคนละ Render service การใช้ `file://` แบบเดิม
+ยังเปิดได้ด้วย `GEOSERVER_UPLOAD_MODE=external` เมื่อทั้งสองบริการ mount โฟลเดอร์ร่วมกัน
+
 ---
 
 ## ขั้นที่ 1 — รัน Python Backend (จำเป็นเสมอ)
@@ -133,5 +137,19 @@ http://localhost:8080/geoserver/sugarcane/wms
 |---|---|
 | หน้าเว็บขึ้น "ไม่สามารถเชื่อมต่อกับ Python Backend ได้" | หน้าต่าง uvicorn ถูกปิดไป ให้เปิดใหม่ตามขั้นที่ 1 |
 | แผนที่ไม่อัปเดตหลังกดคำนวณ | ล้าง cache: GeoServer → Tile Caching → Tile Layers → Empty |
-| `publish ไม่สำเร็จ (HTTP 500)` | ตรวจว่า GeoServer อ่านพาธไฟล์ `.tif` ได้ (ถ้าคนละเครื่อง ต้องตั้ง `GEOSERVER_DATA_DIR` เป็นพาธบนเครื่อง GeoServer) |
+| `publish ไม่สำเร็จ (HTTP 500)` | ตรวจ `GEOSERVER_URL`, user/password และสถานะ REST ของ GeoServer; ถ้าใช้ `GEOSERVER_UPLOAD_MODE=external` ต้องให้ GeoServer อ่านพาธไฟล์ `.tif` ได้ด้วย |
 | เลเยอร์ขึ้นเป็นสีเทาทึบ | สไตล์ยังไม่ถูกผูก — เข้า GeoServer → Layers → เลือกเลเยอร์ → tab Publishing → Default Style = `suitability_fao` |
+
+## ทดสอบการอัปโหลดไฟล์จริง
+
+สร้างไฟล์ตัวอย่างที่เป็น GeoTIFF และ Shapefile ZIP ได้ด้วยคำสั่งนี้:
+
+```powershell
+python tools/create_upload_fixtures.py
+```
+
+จะได้ `upload-fixtures/khonkaen-demo-layer.tif` และ
+`upload-fixtures/khonkaen-demo-layer-shapefile.zip` ซึ่งเป็นไฟล์ EPSG:4326
+ขนาดเล็กสำหรับอัปโหลดผ่านปุ่มของแต่ละปัจจัยในหน้าเว็บ ไฟล์ Shapefile จะใช้
+`geopandas/fiona` เมื่อมีไลบรารีครบ และจะ fallback เป็น `pyshp + shapely`
+เมื่อสภาพแวดล้อมไม่มี GDAL/Fiona

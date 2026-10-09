@@ -593,8 +593,10 @@ def _read_shapefile_zip_to_grid(content: bytes) -> np.ndarray:
         import geopandas as gpd
         import shapely
         from shapely.ops import unary_union
-    except ImportError as exc:
-        raise HTTPException(500, "ต้องติดตั้งไลบรารี geopandas ก่อน (pip install geopandas)") from exc
+    except ImportError:
+        # Render and other slim Python images may not have Fiona/GDAL wheels.
+        # pyshp reads the same .shp/.shx/.dbf bytes without native libraries.
+        return _read_shapefile_zip_to_grid_pyshp(content)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, "upload.zip")
@@ -609,7 +611,12 @@ def _read_shapefile_zip_to_grid(content: bytes) -> np.ndarray:
             raise HTTPException(400, "ไม่พบไฟล์ .shp ภายในไฟล์ ZIP ที่อัปโหลด")
         
         shp_path = os.path.join(tmpdir, shp_files[0])
-        gdf = gpd.read_file(shp_path)
+        try:
+            gdf = gpd.read_file(shp_path)
+        except Exception:
+            # Keep uploads working when geopandas is installed but Fiona/GDAL
+            # cannot open this particular archive.
+            return _read_shapefile_zip_to_grid_pyshp(content)
         
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs(epsg=4326)
@@ -625,6 +632,61 @@ def _read_shapefile_zip_to_grid(content: bytes) -> np.ndarray:
         
         KM_PER_DEGREE = 111.32
         return distances_deg * KM_PER_DEGREE
+
+
+def _read_shapefile_zip_to_grid_pyshp(content: bytes) -> np.ndarray:
+    """Read a zipped Polygon Shapefile with pure-Python pyshp.
+
+    The fallback intentionally assumes geographic coordinates (EPSG:4326)
+    when a .prj is absent.  GeoServer and the normal geopandas path still
+    support reprojection for projected source files.
+    """
+    try:
+        import shapefile
+        from shapely.geometry import shape
+        from shapely.ops import unary_union
+        import shapely
+    except ImportError as exc:
+        raise HTTPException(
+            500,
+            "ต้องติดตั้งไลบรารี geopandas หรือ pyshp + shapely ก่อน",
+        ) from exc
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
+            members = [name for name in archive.namelist() if not name.endswith("/")]
+            shp_name = next((name for name in members if name.lower().endswith(".shp")), None)
+            if not shp_name:
+                raise HTTPException(400, "ไม่พบไฟล์ .shp ภายในไฟล์ ZIP ที่อัปโหลด")
+
+            stem = shp_name[:-4]
+            lookup = {name.lower(): name for name in members}
+            shx_name = next((lookup.get(f"{stem}.shx".lower()),
+                             lookup.get(f"{pathlib.PurePosixPath(stem).name}.shx".lower())), None)
+            dbf_name = next((lookup.get(f"{stem}.dbf".lower()),
+                             lookup.get(f"{pathlib.PurePosixPath(stem).name}.dbf".lower())), None)
+
+            reader_kwargs = {"shp": io.BytesIO(archive.read(shp_name))}
+            if shx_name:
+                reader_kwargs["shx"] = io.BytesIO(archive.read(shx_name))
+            if dbf_name:
+                reader_kwargs["dbf"] = io.BytesIO(archive.read(dbf_name))
+            reader = shapefile.Reader(**reader_kwargs)
+            geoms = [shape(record.__geo_interface__) for record in reader.shapes()
+                     if record.shapeType != shapefile.NULL]
+    except HTTPException:
+        raise
+    except (zipfile.BadZipFile, shapefile.ShapefileException, ValueError) as exc:
+        raise HTTPException(400, f"ไฟล์ Shapefile ไม่ถูกต้อง: {exc}") from exc
+
+    if not geoms:
+        raise HTTPException(400, "ไฟล์ Shapefile ไม่มีข้อมูลรูปทรง (Geometry)")
+
+    merged = unary_union(geoms)
+    LON, LAT = _grid_lonlat()
+    points = shapely.points(LON.ravel(), LAT.ravel())
+    distances_deg = shapely.distance(points, merged).reshape(LON.shape)
+    return distances_deg * 111.32
 
 class ClassBreak(BaseModel):
     min: float
@@ -773,9 +835,8 @@ def calculate_suitability(data: SuitabilityRequest):
     # ถ้า GeoServer ปิดอยู่/ต่อไม่ติด จะไม่ทำให้ระบบล่ม แค่คืน published=false
     # แล้วหน้าเว็บจะใช้ภาพ PNG (image_base64) แสดงผลแทนตามเดิม
     geoserver_info = {"published": False, "reason": "disabled"}
-    # Render โหมดปกติปิด GeoServer อยู่แล้ว จึงไม่ควร import/เขียน GeoTIFF
-    # ในทุก request เพราะ native rasterio อาจไม่พร้อมและทำให้ผู้ใช้เห็น error
-    # ทั้งที่ fallback PNG ทำงานได้ตามปกติ
+    # เขียน GeoTIFF เฉพาะเมื่อเปิด GeoServer; ถ้าบริการยังตื่นไม่ทันหรือ
+    # publish ไม่สำเร็จ ระบบยังคืนผลลัพธ์ PNG ให้หน้าเว็บต่อได้ตามปกติ
     if gs.GEOSERVER_ENABLED:
         try:
             tif_path = gs.write_result_geotiff(suitability, province_mask, KHONKAEN_BOUNDS)
