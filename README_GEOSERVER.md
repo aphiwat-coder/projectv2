@@ -145,7 +145,7 @@ http://localhost:8080/geoserver/sugarcane/wms
 สร้างไฟล์ตัวอย่างที่เป็น GeoTIFF และ Shapefile ZIP ได้ด้วยคำสั่งนี้:
 
 ```powershell
-python tools/create_upload_fixtures.py
+python backend/tools/create_upload_fixtures.py
 ```
 
 จะได้ `upload-fixtures/khonkaen-demo-layer.tif` และ
