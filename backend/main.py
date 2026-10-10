@@ -538,8 +538,8 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
     except (ImportError, OSError):
         # Rasterio/GDAL is the preferred path because it supports arbitrary
         # CRS and resampling.  Some slim hosting images cannot load its native
-        # dependency, so keep uploads working for ordinary EPSG:4326 GeoTIFFs
-        # with the pure-Python fallback below.
+        # dependency, so keep common WGS84 and UTM uploads working with the
+        # pure-Python fallback below.
         return _read_geotiff_to_grid_tifffile(content)
 
     try:
@@ -554,6 +554,22 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
             with memfile.open() as src:
                 src_band = src.read(1, masked=True).astype("float64")
                 src_crs = src.crs or "EPSG:4326"
+                try:
+                    gdal_metadata = " ".join(
+                        str(value)
+                        for tag_map in (
+                            src.tags(),
+                            src.tags(1),
+                            src.tags(ns="xml:GDAL"),
+                        )
+                        for value in tag_map.values()
+                    ).lower()
+                except Exception:
+                    gdal_metadata = ""
+                resampling = (
+                    Resampling.nearest if "thematic" in gdal_metadata
+                    else Resampling.bilinear
+                )
 
                 reproject(
                     source=src_band.filled(np.nan),
@@ -562,7 +578,7 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
                     src_crs=src_crs,
                     dst_transform=dst_transform,
                     dst_crs="EPSG:4326",
-                    resampling=Resampling.bilinear,
+                    resampling=resampling,
                     src_nodata=np.nan,
                     dst_nodata=np.nan,
                 )
@@ -590,12 +606,11 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
 
 
 def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
-    """Read an axis-aligned EPSG:4326 GeoTIFF without GDAL.
+    """Read an axis-aligned GeoTIFF without GDAL.
 
     This is a deployment safety net, not a replacement for rasterio.  It
-    handles the common WGS84 GeoTIFF produced by GIS exports and by the demo
-    fixture.  Projected/rotated rasters still require rasterio so that their
-    coordinates can be reprojected correctly.
+    handles WGS84 files and common projected files such as UTM when pyproj is
+    available. Rotated rasters still require rasterio for full support.
     """
     try:
         import tifffile
@@ -640,14 +655,12 @@ def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
             if source.shape != (height, width):
                 raise ValueError("ขนาดข้อมูล raster ไม่ตรงกับ metadata ของไฟล์")
 
-            crs_epsg = _geotiff_epsg(tags.get(34735))
-            if crs_epsg not in (None, 4326):
-                raise ValueError(
-                    f"GeoTIFF ใช้ EPSG:{crs_epsg}; โหมดสำรองรองรับเฉพาะ EPSG:4326 "
-                    "กรุณาติดตั้ง/ใช้ rasterio เพื่อ reproject ไฟล์นี้"
-                )
+            source_epsg = _geotiff_epsg(tags.get(34735))
+            if source_epsg is None:
+                raise ValueError("ไม่พบ EPSG ใน metadata ของ GeoTIFF")
 
             west, south, east, north = _geotiff_bounds(tags, width, height)
+            is_thematic = _is_thematic_geotiff(tags)
             values = source.astype(np.float64, copy=True)
             nodata = _geotiff_nodata(tags)
             if nodata is not None:
@@ -677,17 +690,51 @@ def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
     )
     lon_grid, lat_grid = np.meshgrid(lon_axis, lat_axis)
 
+    if source_epsg == 4326:
+        source_x_grid, source_y_grid = lon_grid, lat_grid
+    else:
+        try:
+            from pyproj import Transformer
+            transformer = Transformer.from_crs(
+                "EPSG:4326", f"EPSG:{source_epsg}", always_xy=True,
+            )
+            source_x_grid, source_y_grid = transformer.transform(lon_grid, lat_grid)
+        except ImportError as exc:
+            raise HTTPException(
+                500,
+                "ระบบต้องใช้ pyproj เพื่ออ่าน GeoTIFF พิกัด EPSG:"
+                f"{source_epsg} (กรุณา deploy ใหม่เพื่อติดตั้ง requirements)",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                400,
+                f"แปลงพิกัด EPSG:4326 ไปเป็น EPSG:{source_epsg} ไม่สำเร็จ: {exc}",
+            ) from exc
+
     pixel_width = (east - west) / width
     pixel_height = (north - south) / height
     if pixel_width <= 0 or pixel_height <= 0:
         raise HTTPException(400, "ขอบเขต GeoTIFF ไม่ถูกต้อง")
 
-    col = (lon_grid - west) / pixel_width - 0.5
-    row = (north - lat_grid) / pixel_height - 0.5
+    col = (source_x_grid - west) / pixel_width - 0.5
+    row = (north - source_y_grid) / pixel_height - 0.5
     valid = (
         (col >= -0.5) & (col <= width - 0.5)
         & (row >= -0.5) & (row <= height - 0.5)
     )
+
+    if is_thematic:
+        col_nearest = np.clip(np.rint(col).astype(np.int64), 0, width - 1)
+        row_nearest = np.clip(np.rint(row).astype(np.int64), 0, height - 1)
+        destination = np.full((GRID_HEIGHT, GRID_WIDTH), np.nan, dtype=np.float64)
+        samples = values[row_nearest, col_nearest]
+        valid &= np.isfinite(samples)
+        destination[valid] = samples[valid]
+        coverage_pct = float(valid.mean() * 100)
+        if np.isnan(destination).any():
+            fill_value = np.nanmean(destination) if np.any(np.isfinite(destination)) else 0.0
+            destination = np.nan_to_num(destination, nan=fill_value)
+        return destination, coverage_pct
 
     col0 = np.floor(col).astype(np.int64)
     row0 = np.floor(row).astype(np.int64)
@@ -734,27 +781,58 @@ def _read_geotiff_pixels_with_pillow(content: bytes):
         with Image.open(io.BytesIO(content)) as image:
             source = np.asarray(image)
             tags = getattr(image, "tag_v2", {})
+            bits_per_sample = _tiff_bits_per_sample(tags)
+            # Pillow expands a 4-bit gray TIFF to 8-bit values (0, 17, …,
+            # 255). Restore its stored categorical values before scoring.
+            if image.mode == "L" and bits_per_sample and bits_per_sample < 8:
+                raw_max = (1 << bits_per_sample) - 1
+                source = np.rint(
+                    source.astype(np.float64) * raw_max / 255
+                ).astype(np.uint8)
             width, height = image.size
     except Exception as exc:
         raise ValueError(f"ตัวอ่าน GeoTIFF สำรองอ่านไฟล์นี้ไม่ได้: {exc}") from exc
     return source, tags, int(width), int(height)
 
 
+def _tiff_tag_value(tag):
+    """Support tifffile's TiffTag and Pillow's direct tag values."""
+    return getattr(tag, "value", tag)
+
+
+def _tiff_bits_per_sample(tags) -> int | None:
+    value = _tiff_tag_value(tags.get(258))
+    if isinstance(value, (tuple, list)):
+        value = value[0] if value else None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_thematic_geotiff(tags) -> bool:
+    metadata = _tiff_tag_value(tags.get(42112))
+    return bool(metadata and "thematic" in str(metadata).lower())
+
+
 def _geotiff_epsg(geokey_tag) -> int | None:
-    """Return the GeoTIFF EPSG code for the common inline GeoKey form."""
+    """Return the preferred projected or geographic GeoTIFF EPSG code."""
     if geokey_tag is None:
         return None
-    values = list(geokey_tag.value)
+    values = list(_tiff_tag_value(geokey_tag))
     if len(values) < 4:
         return None
     number_of_keys = int(values[3])
+    geographic_epsg = None
     for offset in range(4, 4 + number_of_keys * 4, 4):
         if offset + 3 >= len(values):
             break
         key_id, tiff_tag, count, value_offset = (int(item) for item in values[offset:offset + 4])
-        if key_id in (2048, 3072) and tiff_tag == 0 and count == 1:
+        if key_id == 3072 and tiff_tag == 0 and count == 1:
             return value_offset
-    return None
+        if key_id == 2048 and tiff_tag == 0 and count == 1:
+            geographic_epsg = value_offset
+    return geographic_epsg
 
 
 def _geotiff_nodata(tags) -> float | None:
@@ -762,7 +840,7 @@ def _geotiff_nodata(tags) -> float | None:
     if tag is None:
         return None
     try:
-        value = tag.value
+        value = _tiff_tag_value(tag)
         if isinstance(value, bytes):
             value = value.decode("ascii", errors="ignore")
         value = str(value).strip().strip("\x00")
@@ -777,7 +855,7 @@ def _geotiff_bounds(tags, width: int, height: int) -> tuple[float, float, float,
     """Extract bounds from standard GeoTIFF scale/tiepoint tags."""
     transform_tag = tags.get(34264)
     if transform_tag is not None:
-        matrix = [float(value) for value in transform_tag.value]
+        matrix = [float(value) for value in _tiff_tag_value(transform_tag)]
         if len(matrix) >= 16 and abs(matrix[1]) < 1e-12 and abs(matrix[4]) < 1e-12:
             west = matrix[3]
             north = matrix[7]
@@ -792,8 +870,8 @@ def _geotiff_bounds(tags, width: int, height: int) -> tuple[float, float, float,
     if scale_tag is None or tiepoint_tag is None:
         raise ValueError("ไม่พบพิกัดขอบเขต GeoTIFF (GeoKey/ModelPixelScale/ModelTiepoint)")
 
-    scale = [float(value) for value in scale_tag.value]
-    tiepoint = [float(value) for value in tiepoint_tag.value]
+    scale = [float(value) for value in _tiff_tag_value(scale_tag)]
+    tiepoint = [float(value) for value in _tiff_tag_value(tiepoint_tag)]
     if len(scale) < 2 or len(tiepoint) < 6:
         raise ValueError("metadata พิกัด GeoTIFF ไม่ครบถ้วน")
     pixel_width = scale[0]

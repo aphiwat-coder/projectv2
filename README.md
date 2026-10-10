@@ -33,7 +33,8 @@ build cache & deploy** ของ service API หลัง sync Blueprint แล�
 ใช้ `Root Directory = backend` และ `Build Command` เป็นการติดตั้ง
 `requirements.txt` ในโฟลเดอร์นั้น การอัปโหลดไฟล์ WGS84 (EPSG:4326) ยังมีตัวอ่าน
 สำรองด้วย `tifffile`/`imagecodecs` เพื่อรองรับ GeoTIFF ที่บีบอัดแบบ PackBits และ
-LZW; ไฟล์ที่เป็น CRS อื่นต้องใช้ rasterio เพื่อ reproject
+LZW และใช้ `pyproj` แปลง GeoTIFF แบบ UTM เช่น EPSG:32647 เป็น WGS84; ไฟล์ที่มี
+การหมุนหรือ CRS พิเศษอื่น ๆ ยังควรใช้ rasterio เพื่อ reproject
 
 Blueprint ตั้ง `GEOSERVER_ENABLED=true` และใช้ `GEOSERVER_UPLOAD_MODE=upload` โดยส่ง
 GeoTIFF ผ่าน REST API จึงไม่ต้องใช้ shared disk ระหว่าง Render services เมื่อกด
