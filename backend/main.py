@@ -11,7 +11,7 @@ import os
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 
 import geoserver_publish as gs
@@ -19,12 +19,15 @@ from pydantic import BaseModel, field_validator
 
 app = FastAPI(title="AHP WebGIS Sugarcane - Khon Kaen")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request, exc):
+    """Return CORS-safe JSON instead of letting a browser report Failed to fetch."""
+    print(f"❌ Unhandled API error: {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "เซิร์ฟเวอร์ประมวลผลไฟล์ไม่สำเร็จ กรุณาลองใหม่ หรือลดขนาดไฟล์"},
+    )
 
 
 @app.get("/health")
@@ -539,38 +542,51 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
         # with the pure-Python fallback below.
         return _read_geotiff_to_grid_tifffile(content)
 
-    dst_transform = from_bounds(
-        KHONKAEN_BOUNDS["west"], KHONKAEN_BOUNDS["south"],
-        KHONKAEN_BOUNDS["east"], KHONKAEN_BOUNDS["north"],
-        GRID_WIDTH, GRID_HEIGHT,
-    )
-    destination = np.zeros((GRID_HEIGHT, GRID_WIDTH), dtype=np.float64)
+    try:
+        dst_transform = from_bounds(
+            KHONKAEN_BOUNDS["west"], KHONKAEN_BOUNDS["south"],
+            KHONKAEN_BOUNDS["east"], KHONKAEN_BOUNDS["north"],
+            GRID_WIDTH, GRID_HEIGHT,
+        )
+        destination = np.zeros((GRID_HEIGHT, GRID_WIDTH), dtype=np.float64)
 
-    with MemoryFile(content) as memfile:
-        with memfile.open() as src:
-            src_band = src.read(1, masked=True).astype("float64")
-            src_crs = src.crs or "EPSG:4326"
+        with MemoryFile(content) as memfile:
+            with memfile.open() as src:
+                src_band = src.read(1, masked=True).astype("float64")
+                src_crs = src.crs or "EPSG:4326"
 
-            reproject(
-                source=src_band.filled(np.nan),
-                destination=destination,
-                src_transform=src.transform,
-                src_crs=src_crs,
-                dst_transform=dst_transform,
-                dst_crs="EPSG:4326",
-                resampling=Resampling.bilinear,
-                src_nodata=np.nan,
-                dst_nodata=np.nan,
-            )
+                reproject(
+                    source=src_band.filled(np.nan),
+                    destination=destination,
+                    src_transform=src.transform,
+                    src_crs=src_crs,
+                    dst_transform=dst_transform,
+                    dst_crs="EPSG:4326",
+                    resampling=Resampling.bilinear,
+                    src_nodata=np.nan,
+                    dst_nodata=np.nan,
+                )
 
-    valid_mask = ~np.isnan(destination)
-    coverage_pct = float(valid_mask.mean() * 100)
+        valid_mask = ~np.isnan(destination)
+        coverage_pct = float(valid_mask.mean() * 100)
 
-    if np.isnan(destination).any():
-        fill_value = np.nanmean(destination) if not np.all(np.isnan(destination)) else 0.0
-        destination = np.nan_to_num(destination, nan=fill_value)
+        if np.isnan(destination).any():
+            fill_value = np.nanmean(destination) if not np.all(np.isnan(destination)) else 0.0
+            destination = np.nan_to_num(destination, nan=fill_value)
 
-    return destination, coverage_pct
+        return destination, coverage_pct
+    except Exception as rasterio_exc:
+        # A working rasterio import does not guarantee that GDAL can decode
+        # every compression/bit depth combination.  Try the secondary reader
+        # before returning a controlled JSON error to the browser.
+        try:
+            return _read_geotiff_to_grid_tifffile(content)
+        except HTTPException as fallback_exc:
+            raise HTTPException(
+                400,
+                "อ่าน GeoTIFF ไม่สำเร็จทั้ง rasterio และตัวอ่านสำรอง: "
+                f"{fallback_exc.detail}",
+            ) from rasterio_exc
 
 
 def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
@@ -1319,3 +1335,15 @@ def download_result(type: str):
         media_type=media_type, 
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# Starlette places its ServerErrorMiddleware outside middlewares registered
+# through ``add_middleware``. Wrapping the finished FastAPI app here keeps the
+# CORS headers on unexpected 500 responses too; otherwise browsers turn those
+# responses into the unhelpful "Failed to fetch" error.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
