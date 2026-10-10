@@ -257,6 +257,12 @@ async function onToggleLayer(factor, visible) {
 async function onUploadLayerFile(factor, file) {
     const row = document.querySelector(`.criteria-row[data-factor="${factor}"]`);
     const badge = row.querySelector('.source-badge');
+
+    const maxUploadBytes = 150 * 1024 * 1024;
+    if (file.size > maxUploadBytes) {
+        showToast("ไฟล์ใหญ่เกินไป ระบบรองรับไฟล์ไม่เกิน 150 MB", "error");
+        return;
+    }
     
     const originalText = badge.textContent;
     const originalClass = badge.className;
@@ -270,10 +276,28 @@ async function onUploadLayerFile(factor, file) {
     formData.append("file", file);
 
     try {
-        const res = await fetch(`${BACKEND_URL}/api/upload-layer`, {
-            method: "POST",
-            body: formData,
-        });
+        let res;
+        let lastNetworkError;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+            try {
+                res = await fetch(`${BACKEND_URL}/api/upload-layer`, {
+                    method: "POST",
+                    body: formData,
+                });
+                break;
+            } catch (err) {
+                lastNetworkError = err;
+                if (attempt < 2) {
+                    await new Promise(resolve => setTimeout(resolve, 2500));
+                }
+            }
+        }
+        if (!res) {
+            throw new Error(
+                "เชื่อมต่อ Python Backend ไม่ได้ กรุณารอสักครู่แล้วลองใหม่ "
+                + (lastNetworkError?.message ? `(${lastNetworkError.message})` : "")
+            );
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || res.statusText);

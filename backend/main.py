@@ -104,6 +104,7 @@ KHONKAEN_BOUNDS = {"west": 101.70, "east": 103.25, "south": 15.55, "north": 17.1
 # ปรับความละเอียดให้คมชัดขึ้น
 GRID_WIDTH = 480
 GRID_HEIGHT = 400
+MAX_UPLOAD_BYTES = 150 * 1024 * 1024
 
 raw_layers: dict[str, np.ndarray] = {}
 uploaded_layers: dict[str, np.ndarray] = {}
@@ -490,7 +491,12 @@ def layer_preview(factor: str):
 @app.post("/api/upload-layer")
 async def upload_layer(factor: str = Form(...), file: UploadFile = File(...)):
     filename = (file.filename or "").lower()
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            413,
+            "ไฟล์ใหญ่เกินไป ระบบรองรับไฟล์อัปโหลดไม่เกิน 150 MB",
+        )
 
     if filename.endswith((".tif", ".tiff")):
         raw, coverage_pct = _read_geotiff_to_grid(content)
