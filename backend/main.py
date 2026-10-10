@@ -526,8 +526,12 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
         from rasterio.io import MemoryFile
         from rasterio.transform import from_bounds
         from rasterio.warp import Resampling, reproject
-    except ImportError as exc:
-        raise HTTPException(500, "ต้องติดตั้งไลบรารี rasterio ก่อน") from exc
+    except (ImportError, OSError):
+        # Rasterio/GDAL is the preferred path because it supports arbitrary
+        # CRS and resampling.  Some slim hosting images cannot load its native
+        # dependency, so keep uploads working for ordinary EPSG:4326 GeoTIFFs
+        # with the pure-Python fallback below.
+        return _read_geotiff_to_grid_tifffile(content)
 
     dst_transform = from_bounds(
         KHONKAEN_BOUNDS["west"], KHONKAEN_BOUNDS["south"],
@@ -561,6 +565,199 @@ def _read_geotiff_to_grid(content: bytes) -> tuple[np.ndarray, float]:
         destination = np.nan_to_num(destination, nan=fill_value)
 
     return destination, coverage_pct
+
+
+def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
+    """Read an axis-aligned EPSG:4326 GeoTIFF without GDAL.
+
+    This is a deployment safety net, not a replacement for rasterio.  It
+    handles the common WGS84 GeoTIFF produced by GIS exports and by the demo
+    fixture.  Projected/rotated rasters still require rasterio so that their
+    coordinates can be reprojected correctly.
+    """
+    try:
+        import tifffile
+    except ImportError as exc:
+        raise HTTPException(
+            500,
+            "ระบบอ่าน GeoTIFF ไม่ได้: ไม่พบ rasterio หรือ tifffile "
+            "(กรุณา deploy ใหม่เพื่อให้ติดตั้ง backend/requirements.txt)",
+        ) from exc
+
+    try:
+        with tifffile.TiffFile(io.BytesIO(content)) as tif:
+            if not tif.pages:
+                raise ValueError("ไม่พบข้อมูลภาพในไฟล์ GeoTIFF")
+            page = tif.pages[0]
+            source = np.asarray(page.asarray())
+            tags = page.tags
+            width = int(page.imagewidth)
+            height = int(page.imagelength)
+
+            # A single-band raster is expected.  For a multi-sample image,
+            # use the first sample rather than silently flattening it.
+            if source.ndim == 3:
+                if source.shape[-2:] == (height, width):
+                    source = source[0]
+                else:
+                    source = source[..., 0]
+            if source.ndim != 2:
+                raise ValueError("รองรับเฉพาะ GeoTIFF แบบ raster 2 มิติ")
+
+            if source.shape != (height, width):
+                source = np.squeeze(source)
+            if source.shape != (height, width):
+                raise ValueError("ขนาดข้อมูล raster ไม่ตรงกับ metadata ของไฟล์")
+
+            crs_epsg = _geotiff_epsg(tags.get(34735))
+            if crs_epsg not in (None, 4326):
+                raise ValueError(
+                    f"GeoTIFF ใช้ EPSG:{crs_epsg}; โหมดสำรองรองรับเฉพาะ EPSG:4326 "
+                    "กรุณาติดตั้ง/ใช้ rasterio เพื่อ reproject ไฟล์นี้"
+                )
+
+            west, south, east, north = _geotiff_bounds(tags, width, height)
+            values = source.astype(np.float64, copy=True)
+            nodata = _geotiff_nodata(tags)
+            if nodata is not None:
+                values[np.isclose(values, nodata, equal_nan=False)] = np.nan
+            values[~np.isfinite(values)] = np.nan
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"อ่าน GeoTIFF ไม่สำเร็จ: {exc}") from exc
+
+    # Destination grid cell centers, in the same top-to-bottom orientation as
+    # a normal GeoTIFF array.
+    lon_axis = np.linspace(
+        KHONKAEN_BOUNDS["west"] + (KHONKAEN_BOUNDS["east"] - KHONKAEN_BOUNDS["west"])
+        / (2 * GRID_WIDTH),
+        KHONKAEN_BOUNDS["east"] - (KHONKAEN_BOUNDS["east"] - KHONKAEN_BOUNDS["west"])
+        / (2 * GRID_WIDTH),
+        GRID_WIDTH,
+    )
+    lat_axis = np.linspace(
+        KHONKAEN_BOUNDS["north"] - (KHONKAEN_BOUNDS["north"] - KHONKAEN_BOUNDS["south"])
+        / (2 * GRID_HEIGHT),
+        KHONKAEN_BOUNDS["south"] + (KHONKAEN_BOUNDS["north"] - KHONKAEN_BOUNDS["south"])
+        / (2 * GRID_HEIGHT),
+        GRID_HEIGHT,
+    )
+    lon_grid, lat_grid = np.meshgrid(lon_axis, lat_axis)
+
+    pixel_width = (east - west) / width
+    pixel_height = (north - south) / height
+    if pixel_width <= 0 or pixel_height <= 0:
+        raise HTTPException(400, "ขอบเขต GeoTIFF ไม่ถูกต้อง")
+
+    col = (lon_grid - west) / pixel_width - 0.5
+    row = (north - lat_grid) / pixel_height - 0.5
+    valid = (
+        (col >= -0.5) & (col <= width - 0.5)
+        & (row >= -0.5) & (row <= height - 0.5)
+    )
+
+    col0 = np.floor(col).astype(np.int64)
+    row0 = np.floor(row).astype(np.int64)
+    col1 = np.clip(col0 + 1, 0, width - 1)
+    row1 = np.clip(row0 + 1, 0, height - 1)
+    col0 = np.clip(col0, 0, width - 1)
+    row0 = np.clip(row0, 0, height - 1)
+    wx = col - col0
+    wy = row - row0
+
+    samples = (
+        values[row0, col0],
+        values[row0, col1],
+        values[row1, col0],
+        values[row1, col1],
+    )
+    weights = (
+        (1 - wy) * (1 - wx),
+        (1 - wy) * wx,
+        wy * (1 - wx),
+        wy * wx,
+    )
+    destination = np.zeros((GRID_HEIGHT, GRID_WIDTH), dtype=np.float64)
+    weighted_sum = np.zeros_like(destination)
+    weight_sum = np.zeros_like(destination)
+    for sample, weight in zip(samples, weights):
+        finite = np.isfinite(sample)
+        weighted_sum[finite] += sample[finite] * weight[finite]
+        weight_sum[finite] += weight[finite]
+    valid &= weight_sum > 0
+    destination[:] = np.nan
+    destination[valid] = weighted_sum[valid] / weight_sum[valid]
+
+    coverage_pct = float(valid.mean() * 100)
+    if np.isnan(destination).any():
+        fill_value = np.nanmean(destination) if np.any(np.isfinite(destination)) else 0.0
+        destination = np.nan_to_num(destination, nan=fill_value)
+    return destination, coverage_pct
+
+
+def _geotiff_epsg(geokey_tag) -> int | None:
+    """Return the GeoTIFF EPSG code for the common inline GeoKey form."""
+    if geokey_tag is None:
+        return None
+    values = list(geokey_tag.value)
+    if len(values) < 4:
+        return None
+    number_of_keys = int(values[3])
+    for offset in range(4, 4 + number_of_keys * 4, 4):
+        if offset + 3 >= len(values):
+            break
+        key_id, tiff_tag, count, value_offset = (int(item) for item in values[offset:offset + 4])
+        if key_id in (2048, 3072) and tiff_tag == 0 and count == 1:
+            return value_offset
+    return None
+
+
+def _geotiff_nodata(tags) -> float | None:
+    tag = tags.get(42113)
+    if tag is None:
+        return None
+    try:
+        value = tag.value
+        if isinstance(value, bytes):
+            value = value.decode("ascii", errors="ignore")
+        value = str(value).strip().strip("\x00")
+        if value.lower() == "nan":
+            return np.nan
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _geotiff_bounds(tags, width: int, height: int) -> tuple[float, float, float, float]:
+    """Extract bounds from standard GeoTIFF scale/tiepoint tags."""
+    transform_tag = tags.get(34264)
+    if transform_tag is not None:
+        matrix = [float(value) for value in transform_tag.value]
+        if len(matrix) >= 16 and abs(matrix[1]) < 1e-12 and abs(matrix[4]) < 1e-12:
+            west = matrix[3]
+            north = matrix[7]
+            pixel_width = matrix[0]
+            pixel_height = abs(matrix[5])
+            if matrix[5] > 0:
+                north = matrix[7] + pixel_height * height
+            return west, north - pixel_height * height, west + pixel_width * width, north
+
+    scale_tag = tags.get(33550)
+    tiepoint_tag = tags.get(33922)
+    if scale_tag is None or tiepoint_tag is None:
+        raise ValueError("ไม่พบพิกัดขอบเขต GeoTIFF (GeoKey/ModelPixelScale/ModelTiepoint)")
+
+    scale = [float(value) for value in scale_tag.value]
+    tiepoint = [float(value) for value in tiepoint_tag.value]
+    if len(scale) < 2 or len(tiepoint) < 6:
+        raise ValueError("metadata พิกัด GeoTIFF ไม่ครบถ้วน")
+    pixel_width = scale[0]
+    pixel_height = scale[1]
+    west = tiepoint[3] - tiepoint[0] * pixel_width
+    north = tiepoint[4] + tiepoint[1] * pixel_height
+    return west, north - pixel_height * height, west + pixel_width * width, north
 
 def _read_geojson_to_grid(content: bytes) -> np.ndarray:
     try:

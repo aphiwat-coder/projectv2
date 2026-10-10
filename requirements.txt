@@ -1,0 +1,3 @@
+# Compatibility entry point for Render services configured with the repository
+# root as Root Directory instead of backend/.
+-r backend/requirements.txt
