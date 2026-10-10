@@ -32,7 +32,8 @@ remoteBackend: "https://ชื่อ-apiของคุณ.onrender.com"
 build cache & deploy** ของ service API หลัง sync Blueprint แล้วตรวจว่า service
 ใช้ `Root Directory = backend` และ `Build Command` เป็นการติดตั้ง
 `requirements.txt` ในโฟลเดอร์นั้น การอัปโหลดไฟล์ WGS84 (EPSG:4326) ยังมีตัวอ่าน
-สำรองด้วย `tifffile`; ไฟล์ที่เป็น CRS อื่นต้องใช้ rasterio เพื่อ reproject
+สำรองด้วย `tifffile`/`imagecodecs` เพื่อรองรับ GeoTIFF ที่บีบอัดแบบ PackBits และ
+LZW; ไฟล์ที่เป็น CRS อื่นต้องใช้ rasterio เพื่อ reproject
 
 Blueprint ตั้ง `GEOSERVER_ENABLED=true` และใช้ `GEOSERVER_UPLOAD_MODE=upload` โดยส่ง
 GeoTIFF ผ่าน REST API จึงไม่ต้องใช้ shared disk ระหว่าง Render services เมื่อกด

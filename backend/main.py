@@ -589,10 +589,19 @@ def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
             if not tif.pages:
                 raise ValueError("ไม่พบข้อมูลภาพในไฟล์ GeoTIFF")
             page = tif.pages[0]
-            source = np.asarray(page.asarray())
-            tags = page.tags
-            width = int(page.imagewidth)
-            height = int(page.imagelength)
+            try:
+                source = np.asarray(page.asarray())
+                tags = page.tags
+                width = int(page.imagewidth)
+                height = int(page.imagelength)
+            except Exception as exc:
+                # tifffile delegates PackBits/LZW/JPEG decoding to
+                # imagecodecs. Pillow/libtiff can still decode many of these
+                # files, so keep the upload usable if the optional decoder is
+                # absent in an old deployment.
+                if "imagecodecs" not in str(exc).lower():
+                    raise
+                source, tags, width, height = _read_geotiff_pixels_with_pillow(content)
 
             # A single-band raster is expected.  For a multi-sample image,
             # use the first sample rather than silently flattening it.
@@ -695,6 +704,18 @@ def _read_geotiff_to_grid_tifffile(content: bytes) -> tuple[np.ndarray, float]:
         fill_value = np.nanmean(destination) if np.any(np.isfinite(destination)) else 0.0
         destination = np.nan_to_num(destination, nan=fill_value)
     return destination, coverage_pct
+
+
+def _read_geotiff_pixels_with_pillow(content: bytes):
+    """Decode compressed TIFF pixels with Pillow when tifffile needs codecs."""
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            source = np.asarray(image)
+            tags = getattr(image, "tag_v2", {})
+            width, height = image.size
+    except Exception as exc:
+        raise ValueError(f"ตัวอ่าน GeoTIFF สำรองอ่านไฟล์นี้ไม่ได้: {exc}") from exc
+    return source, tags, int(width), int(height)
 
 
 def _geotiff_epsg(geokey_tag) -> int | None:
